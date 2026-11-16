@@ -4,7 +4,7 @@
  * Levanta el sitio, sube una foto real por el input y verifica el resultado.
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -20,6 +20,7 @@ const ANCHO = SHOT === "desktop" ? 1200 : 430;
 const ALTO = SHOT === "desktop" ? 900 : 932;
 
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
+mkdirSync(".shots", { recursive: true });
 
 async function esperarJson(url, intentos = 60) {
   for (let i = 0; i < intentos; i += 1) {
