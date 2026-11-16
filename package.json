@@ -1,0 +1,13 @@
+{
+  "name": "awebp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Convierte tus fotos a WebP sin subirlas a ningun lado. PWA, 100% en el navegador.",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "serve": "python3 -m http.server 8080"
+  },
+  "license": "MIT",
+  "author": "Boudicca (https://github.com/Synapse-VE)"
+}
