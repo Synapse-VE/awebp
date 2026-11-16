@@ -32,6 +32,8 @@ const el = {
   chips: [...document.querySelectorAll(".chip")],
 };
 
+const forzarWasm = new URLSearchParams(location.search).has("wasm");
+
 const estado = {
   archivo: null,
   calidad: 0.8,
@@ -77,6 +79,7 @@ async function procesar({ silencioso = false } = {}) {
     const resultado = await convertir(estado.archivo, {
       calidad: estado.calidad,
       maxLado: estado.maxLado,
+      forzarWasm,
     });
 
     if (token !== estado.token) return;

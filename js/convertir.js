@@ -7,12 +7,13 @@ import { calcularObjetivo } from "./reglas.js";
  * verifica el tipo del blob resultante en vez de confiar en la llamada.
  *
  * @param {File | Blob} archivo
- * @param {{calidad?: number, maxLado?: number}} [opciones]
+ * @param {{calidad?: number, maxLado?: number, forzarWasm?: boolean}} [opciones]
  * @returns {Promise<{blob: Blob, ancho: number, alto: number, original: {ancho: number, alto: number}, escalado: boolean, motivo: string, calidad: number}>}
  */
 export async function convertir(archivo, opciones = {}) {
   const calidad = Math.min(1, Math.max(0.1, opciones.calidad ?? 0.8));
   const maxLado = opciones.maxLado ?? 0;
+  const forzarWasm = opciones.forzarWasm === true;
 
   const fuente = await decodificar(archivo);
   const objetivo = calcularObjetivo(fuente.ancho, fuente.alto, maxLado);
@@ -29,7 +30,7 @@ export async function convertir(archivo, opciones = {}) {
     contexto.imageSmoothingQuality = "high";
     fuente.dibujar(contexto, objetivo.ancho, objetivo.alto);
 
-    const blob = await codificar(lienzo, calidad);
+    const blob = await codificar(lienzo, calidad, { forzarWasm });
 
     return {
       blob,
@@ -118,7 +119,11 @@ async function decodificarConImagen(archivo) {
  * @param {number} calidad
  * @returns {Promise<Blob>}
  */
-async function codificar(lienzo, calidad) {
+async function codificar(lienzo, calidad, { forzarWasm = false } = {}) {
+  if (forzarWasm) {
+    return codificarConWasm(lienzo, calidad);
+  }
+
   if (typeof OffscreenCanvas === "function") {
     try {
       const fueraDePantalla = new OffscreenCanvas(lienzo.width, lienzo.height);
@@ -153,7 +158,28 @@ async function codificar(lienzo, calidad) {
     // Tampoco hay suerte por aca.
   }
 
-  throw crearError("SIN_WEBP");
+  try {
+    return await codificarConWasm(lienzo, calidad);
+  } catch {
+    throw crearError("SIN_WEBP");
+  }
+}
+
+/**
+ * Ultimo recurso: libwebp en WebAssembly. Es el unico camino que funciona en
+ * Safari, que no sabe codificar WebP con el canvas.
+ * @param {HTMLCanvasElement} lienzo
+ * @param {number} calidad 0-1
+ * @returns {Promise<Blob>}
+ */
+async function codificarConWasm(lienzo, calidad) {
+  const contexto = lienzo.getContext("2d");
+  if (!contexto) throw crearError("SIN_CANVAS");
+
+  const datos = contexto.getImageData(0, 0, lienzo.width, lienzo.height);
+  const { codificarWebp } = await import("../vendor/webp/codificar.js");
+
+  return codificarWebp(datos, { calidad: calidad * 100 });
 }
 
 /**

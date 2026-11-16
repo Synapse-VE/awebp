@@ -13,6 +13,7 @@ const PUERTO_CDP = 9333;
 const URL_BASE = `http://127.0.0.1:${PUERTO_SITIO}/`;
 const FIXTURE = resolve("tools/fixtures/foto.jpg");
 const SHOT = process.argv[2] ?? "mobile";
+const EXTRA = process.argv[3] === "wasm" ? "?wasm=1" : "";
 const ANCHO = SHOT === "desktop" ? 1200 : 430;
 const ALTO = SHOT === "desktop" ? 900 : 932;
 
@@ -31,6 +32,8 @@ async function esperarJson(url, intentos = 60) {
   throw new Error(`no respondio ${url}`);
 }
 
+const eventos = [];
+
 class CDP {
   constructor(ws) {
     this.ws = ws;
@@ -38,6 +41,10 @@ class CDP {
     this.pendientes = new Map();
     ws.addEventListener("message", (evento) => {
       const mensaje = JSON.parse(evento.data);
+      if (!mensaje.id) {
+        eventos.push(mensaje);
+        return;
+      }
       const pendiente = this.pendientes.get(mensaje.id);
       if (!pendiente) return;
       this.pendientes.delete(mensaje.id);
@@ -79,7 +86,7 @@ const chrome = spawn(
     `--remote-debugging-port=${PUERTO_CDP}`,
     `--user-data-dir=${perfil}`,
     `--window-size=${ANCHO},${ALTO}`,
-    URL_BASE,
+    URL_BASE + EXTRA,
   ],
   { stdio: "ignore" },
 );
@@ -198,12 +205,20 @@ try {
     captureBeyondViewport: true,
     clip: { x: 0, y: 0, width, height, scale: 1 },
   });
-  writeFileSync(`.shots/e2e-${SHOT}.png`, Buffer.from(captura.data, "base64"));
+  writeFileSync(`.shots/e2e-${SHOT}${EXTRA ? "-wasm" : ""}.png`, Buffer.from(captura.data, "base64"));
 
   console.log(`OK ${SHOT}`);
   salida = 0;
 } catch (error) {
   console.error(`FALLO: ${error.message}`);
+  for (const evento of eventos.slice(-8)) {
+    if (evento.method === "Runtime.exceptionThrown") {
+      console.error("excepcion:", JSON.stringify(evento.params.exceptionDetails).slice(0, 400));
+    }
+    if (evento.method === "Runtime.consoleAPICalled") {
+      console.error("console:", evento.params.args?.map((a) => a.value ?? a.description).join(" ").slice(0, 300));
+    }
+  }
 } finally {
   chrome.kill("SIGKILL");
   sitio.kill("SIGKILL");
