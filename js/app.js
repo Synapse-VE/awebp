@@ -210,6 +210,56 @@ function reprogramar() {
   temporizador = setTimeout(() => procesar({ silencioso: true }), 220);
 }
 
+function traeArchivos(evento) {
+  return Boolean(evento.dataTransfer?.types?.includes("Files"));
+}
+
+let profundidadArrastre = 0;
+
+window.addEventListener("dragenter", (evento) => {
+  if (!traeArchivos(evento)) return;
+  evento.preventDefault();
+  profundidadArrastre += 1;
+  document.body.classList.add("recibiendo");
+});
+
+window.addEventListener("dragover", (evento) => {
+  if (traeArchivos(evento)) evento.preventDefault();
+});
+
+window.addEventListener("dragleave", (evento) => {
+  if (!traeArchivos(evento)) return;
+  profundidadArrastre = Math.max(0, profundidadArrastre - 1);
+  if (profundidadArrastre === 0) document.body.classList.remove("recibiendo");
+});
+
+window.addEventListener("drop", (evento) => {
+  if (!traeArchivos(evento)) return;
+  evento.preventDefault();
+  profundidadArrastre = 0;
+  document.body.classList.remove("recibiendo");
+  const [archivo] = evento.dataTransfer.files ?? [];
+  tomarArchivo(archivo);
+});
+
+window.addEventListener("paste", (evento) => {
+  const datos = evento.clipboardData;
+  if (!datos) return;
+
+  const items = datos.items ? Array.from(datos.items) : [];
+  const deItem = items
+    .find((item) => item.kind === "file" && item.type.startsWith("image/"))
+    ?.getAsFile();
+
+  const archivos = datos.files ? Array.from(datos.files) : [];
+  const archivo = deItem ?? archivos.find((candidato) => candidato.type.startsWith("image/"));
+
+  if (!archivo) return;
+
+  evento.preventDefault();
+  tomarArchivo(archivo);
+});
+
 el.botonCamara.addEventListener("click", () => el.inputCamara.click());
 el.botonElegir.addEventListener("click", () => el.inputGaleria.click());
 
