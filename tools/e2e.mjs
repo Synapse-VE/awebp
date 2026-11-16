@@ -184,7 +184,33 @@ try {
     if (!ok) throw new Error("no se pudo inyectar el archivo");
   };
 
-  if (MODO === "input" || MODO === "wasm") {
+  if (MODO === "share") {
+    const listoSW = await evaluar(`(async () => {
+      if (!("serviceWorker" in navigator)) return false;
+      await navigator.serviceWorker.ready;
+      for (let i = 0; i < 60 && !navigator.serviceWorker.controller; i += 1) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      return Boolean(navigator.serviceWorker.controller);
+    })()`, { awaitPromise: true });
+    if (!listoSW) throw new Error("el service worker no controla la pagina");
+
+    const respuesta = await evaluar(`(async () => {
+      const archivo = await ${generadorFoto()};
+      const datos = new FormData();
+      datos.append("fotos", archivo);
+      const r = await fetch("./compartir", { method: "POST", body: datos });
+      return { estado: r.status, tipo: r.type };
+    })()`, { awaitPromise: true });
+    console.log("post compartir:", JSON.stringify(respuesta));
+
+    await cdp.enviar("Page.navigate", { url: `${URL_BASE}?compartido=1` });
+    for (let i = 0; i < 80; i += 1) {
+      const ok = await evaluar("document.readyState === 'complete' && !!document.getElementById('archivo-galeria')");
+      if (ok) break;
+      await dormir(150);
+    }
+  } else if (MODO === "input" || MODO === "wasm") {
     await inyectar(`(async () => [await ${generadorFoto()}])()`);
   } else if (MODO === "heic") {
     await inyectar(`(async () => {

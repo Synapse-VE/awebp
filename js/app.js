@@ -394,6 +394,7 @@ async function compartir() {
 function reiniciar() {
   limpiarTodo();
   ver("zona");
+recogerCompartido();
 }
 
 /* ---------- entrada ---------- */
@@ -497,6 +498,51 @@ el.otra.addEventListener("click", reiniciar);
 el.otraLista.addEventListener("click", reiniciar);
 el.errorReintentar.addEventListener("click", reiniciar);
 
+/* ---------- lo que llega compartido desde el sistema ---------- */
+
+const CACHE_COMPARTIDO = "awebp-compartido-v1";
+const BASE_COMPARTIDO = new URL("__compartido__/", document.baseURI).href;
+
+async function recogerCompartido() {
+  if (!location.search.includes("compartido")) return;
+  if (!("caches" in window)) return;
+
+  try {
+    const cache = await caches.open(CACHE_COMPARTIDO);
+    const respuestaIndice = await cache.match(new URL("indice", BASE_COMPARTIDO).href);
+
+    if (respuestaIndice) {
+      const indice = await respuestaIndice.json();
+      const archivos = [];
+
+      for (const [posicion, meta] of indice.entries()) {
+        const respuesta = await cache.match(new URL(String(posicion), BASE_COMPARTIDO).href);
+        if (!respuesta) continue;
+
+        const blob = await respuesta.blob();
+        archivos.push(
+          new File([blob], meta.nombre || `foto-${posicion + 1}.jpg`, {
+            type: meta.tipo || blob.type || "image/jpeg",
+          }),
+        );
+      }
+
+      await caches.delete(CACHE_COMPARTIDO);
+      history.replaceState(null, "", location.pathname);
+
+      if (archivos.length > 0) {
+        await agregarArchivos(archivos);
+      }
+
+      return;
+    }
+  } catch {
+    // Si falla, la app arranca normal.
+  }
+
+  history.replaceState(null, "", location.pathname);
+}
+
 /* ---------- PWA ---------- */
 
 const instalada = () =>
@@ -544,3 +590,4 @@ if ("serviceWorker" in navigator) {
 }
 
 ver("zona");
+recogerCompartido();

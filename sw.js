@@ -6,8 +6,9 @@
  * visita es instantanea y, cuando hay una version nueva, se toma en la
  * siguiente recarga. El wasm del encoder se cachea la primera vez que se usa.
  */
-const VERSION = "1";
+const VERSION = "2";
 const CACHE = `awebp-v${VERSION}`;
+const CACHE_COMPARTIDO = "awebp-compartido-v1";
 
 const ESQUELETO = [
   "./",
@@ -56,14 +57,60 @@ self.addEventListener("activate", (evento) => {
 
 self.addEventListener("fetch", (evento) => {
   const { request } = evento;
+  const url = new URL(request.url);
+
+  if (request.method === "POST") {
+    if (url.origin === self.location.origin && url.pathname.endsWith("/compartir")) {
+      evento.respondWith(recibirCompartido(request));
+    }
+    return;
+  }
 
   if (request.method !== "GET") return;
-
-  const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
   evento.respondWith(responder(request));
 });
+
+function urlCompartida(nombre = "") {
+  return new URL(`__compartido__/${nombre}`, self.registration.scope).href;
+}
+
+/**
+ * Recibe lo que se comparte desde el sistema (Android): guarda los archivos en
+ * Cache Storage y manda a la app con una marca en la URL para que los levante.
+ * @param {Request} request
+ * @returns {Promise<Response>}
+ */
+async function recibirCompartido(request) {
+  try {
+    const datos = await request.formData();
+    const archivos = [...datos.getAll("fotos"), ...datos.getAll("archivos")].filter(
+      (valor) => valor instanceof File,
+    );
+
+    await caches.delete(CACHE_COMPARTIDO);
+    const cache = await caches.open(CACHE_COMPARTIDO);
+    const indice = [];
+
+    for (const [posicion, archivo] of archivos.entries()) {
+      await cache.put(
+        urlCompartida(String(posicion)),
+        new Response(archivo, { headers: { "Content-Type": archivo.type || "application/octet-stream" } }),
+      );
+      indice.push({ nombre: archivo.name, tipo: archivo.type });
+    }
+
+    await cache.put(
+      urlCompartida("indice"),
+      new Response(JSON.stringify(indice), { headers: { "Content-Type": "application/json" } }),
+    );
+
+    return Response.redirect(new URL("./?compartido=1", self.registration.scope).href, 303);
+  } catch {
+    return Response.redirect(new URL("./?compartido=error", self.registration.scope).href, 303);
+  }
+}
 
 /**
  * @param {Request} request
