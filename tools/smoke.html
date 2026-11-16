@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>smoke</title>
+  </head>
+  <body>
+    <pre id="salida">corriendo…</pre>
+    <script type="module">
+      import { convertir } from "../js/convertir.js";
+
+      const salida = document.getElementById("salida");
+      const log = (linea) => {
+        salida.textContent += `\n${linea}`;
+      };
+
+      try {
+        const lienzo = document.createElement("canvas");
+        lienzo.width = 640;
+        lienzo.height = 480;
+        const ctx = lienzo.getContext("2d");
+        const degradado = ctx.createLinearGradient(0, 0, 640, 480);
+        degradado.addColorStop(0, "#22d3ee");
+        degradado.addColorStop(1, "#34d399");
+        ctx.fillStyle = degradado;
+        ctx.fillRect(0, 0, 640, 480);
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "bold 64px sans-serif";
+        ctx.fillText("awebp", 40, 260);
+
+        const original = await new Promise((r) => lienzo.toBlob(r, "image/jpeg", 0.95));
+        log(`original: ${original.type} ${original.size} bytes`);
+
+        const completa = await convertir(original, { calidad: 0.8 });
+        log(`webp: ${completa.blob.type} ${completa.blob.size} bytes ${completa.ancho}x${completa.alto}`);
+
+        const chica = await convertir(original, { calidad: 0.5, maxLado: 320 });
+        log(`320px: ${chica.blob.type} ${chica.blob.size} bytes ${chica.ancho}x${chica.alto}`);
+
+        log("FIN");
+      } catch (error) {
+        log(`ERROR ${error.codigo ?? ""} ${error.message}`);
+      }
+    </script>
+  </body>
+</html>

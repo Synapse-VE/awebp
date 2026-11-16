@@ -1,0 +1,27 @@
+<!doctype html>
+<html><body><pre id="s">inicio</pre>
+<script>
+const s = document.getElementById("s");
+const log = (m) => { s.textContent += "\n" + m; };
+(async () => {
+  try {
+    const c = document.createElement("canvas");
+    c.width = 320; c.height = 240;
+    const x = c.getContext("2d");
+    x.fillStyle = "#22d3ee"; x.fillRect(0,0,320,240);
+    log("canvas listo");
+
+    const jpeg = await new Promise((r) => c.toBlob(r, "image/jpeg", 0.9));
+    log("jpeg: " + (jpeg && jpeg.type) + " " + (jpeg && jpeg.size));
+
+    const webp = await new Promise((r) => c.toBlob(r, "image/webp", 0.8));
+    log("webp canvas: " + (webp && webp.type) + " " + (webp && webp.size));
+
+    const bmp = await createImageBitmap(jpeg, { imageOrientation: "from-image" });
+    log("bitmap: " + bmp.width + "x" + bmp.height);
+    log("FIN");
+  } catch (e) {
+    log("ERROR " + e.message);
+  }
+})();
+</script></body></html>
