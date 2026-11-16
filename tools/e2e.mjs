@@ -10,7 +10,8 @@ import { join, resolve } from "node:path";
 
 const PUERTO_SITIO = 8099;
 let PUERTO_CDP = 0;
-const URL_BASE = `http://127.0.0.1:${PUERTO_SITIO}/`;
+const URL_EXTERNA = process.env.AWEBP_URL ?? "";
+const URL_BASE = URL_EXTERNA || `http://127.0.0.1:${PUERTO_SITIO}/`;
 const FIXTURE = resolve("tools/fixtures/foto.jpg");
 const SHOT = process.argv[2] ?? "mobile";
 const MODO = process.argv[3] ?? "input";
@@ -74,9 +75,9 @@ async function conectar(url) {
   return new CDP(ws);
 }
 
-const sitio = spawn("python3", ["-m", "http.server", String(PUERTO_SITIO), "--bind", "127.0.0.1"], {
-  stdio: "ignore",
-});
+const sitio = URL_EXTERNA
+  ? null
+  : spawn("python3", ["-m", "http.server", String(PUERTO_SITIO), "--bind", "127.0.0.1"], { stdio: "ignore" });
 
 const perfil = mkdtempSync(join(tmpdir(), "awebp-chrome-"));
 const chrome = spawn(
@@ -141,13 +142,31 @@ try {
   }
   if (!listo) throw new Error("la pagina no termino de cargar");
 
-  const datosDelEvento = `(async () => {
-    const respuesta = await fetch("./tools/fixtures/foto.jpg");
-    const blob = await respuesta.blob();
-    return new File([blob], "foto.jpg", { type: "image/jpeg" });
-  })()`;
+  // El HEIC necesita un archivo real; el resto se genera en el navegador para
+  // poder correr la misma prueba contra localhost o contra la URL publicada.
+  const datosDelEvento = MODO === "heic"
+    ? `(async () => {
+        const respuesta = await fetch("./tools/fixtures/ejemplo.heic");
+        const blob = await respuesta.blob();
+        return new File([blob], "ejemplo.heic", { type: "image/heic" });
+      })()`
+    : `(async () => {
+        const lienzo = document.createElement("canvas");
+        lienzo.width = 1600;
+        lienzo.height = 1200;
+        const contexto = lienzo.getContext("2d");
+        const degradado = contexto.createLinearGradient(0, 0, 1600, 1200);
+        degradado.addColorStop(0, "#22d3ee");
+        degradado.addColorStop(1, "#f472b6");
+        contexto.fillStyle = degradado;
+        contexto.fillRect(0, 0, 1600, 1200);
+        contexto.fillStyle = "#ffffff";
+        contexto.fillRect(100, 100, 400, 120);
+        const blob = await new Promise((r) => lienzo.toBlob(r, "image/jpeg", 0.92));
+        return new File([blob], "foto.jpg", { type: "image/jpeg" });
+      })()`;
 
-  if (MODO === "input" || MODO === "wasm") {
+  if (MODO === "input" || MODO === "wasm" || MODO === "heic") {
     const ok = await evaluar(`(async () => {
       const archivo = await ${datosDelEvento};
       const datos = new DataTransfer();
@@ -221,6 +240,19 @@ try {
   if (datos.tipo !== "image/webp") throw new Error(`el blob salio como ${datos.tipo}`);
   if (!(datos.pesoWebp > 0)) throw new Error("el blob salio vacio");
 
+  // La vista previa del original tiene que cargar (clave en HEIC).
+  const previa = await evaluar(`(async () => {
+    const imagen = document.getElementById("vista-original");
+    if (!imagen.src) return "sin src";
+    try {
+      await imagen.decode();
+      return imagen.naturalWidth > 0 ? "ok" : "vacia";
+    } catch {
+      return "error";
+    }
+  })()`, { awaitPromise: true });
+  if (previa !== "ok") throw new Error(`la vista previa del original no carga: ${previa}`);
+
   // Cambiar la calidad tiene que reconvertir sin refrescar la pagina.
   await evaluar(`(() => {
     const control = document.getElementById("calidad");
@@ -256,7 +288,9 @@ try {
   await esperarQuieto();
   const trasTamano = await evaluar("document.getElementById('dimensiones').textContent");
   console.log("max 800:", trasTamano);
-  if (!/^800 × 600 px$/.test(trasTamano)) throw new Error(`tamano inesperado: ${trasTamano}`);
+  const medidas = trasTamano.match(/^(\d+) × (\d+) px$/);
+  if (!medidas || Number(medidas[1]) !== 800) throw new Error(`tamano inesperado: ${trasTamano}`);
+  if (Number(medidas[2]) % 2 !== 0) throw new Error(`alto raro: ${trasTamano}`);
 
   const metricas = await cdp.enviar("Page.getLayoutMetrics");
   const { width, height } = metricas.cssContentSize;
@@ -267,7 +301,7 @@ try {
   });
   writeFileSync(`.shots/e2e-${SHOT}-${MODO}.png`, Buffer.from(captura.data, "base64"));
 
-  if (PROBAR_OFFLINE) {
+  if (PROBAR_OFFLINE && sitio) {
     const pwa = await evaluar(`(async () => {
       const registros = await navigator.serviceWorker.getRegistrations();
       await navigator.serviceWorker.ready;
@@ -276,7 +310,7 @@ try {
     console.log("pwa:", JSON.stringify(pwa));
     if (!pwa.registros) throw new Error("no se registro el service worker");
 
-    sitio.kill("SIGKILL");
+    sitio?.kill("SIGKILL");
     await dormir(900);
 
     await cdp.enviar("Page.reload", { ignoreCache: false });
@@ -301,7 +335,7 @@ try {
   }
 } finally {
   chrome.kill("SIGKILL");
-  sitio.kill("SIGKILL");
+  sitio?.kill("SIGKILL");
 }
 
 process.exit(salida);

@@ -1,10 +1,13 @@
-import { calcularObjetivo } from "./reglas.js";
+import { calcularObjetivo, esMarcaHeic } from "./reglas.js";
 
 /**
  * Convierte un archivo de imagen a WebP usando el canvas del navegador.
  *
  * Ojo: Safari no sabe codificar WebP y devuelve PNG en silencio; por eso se
  * verifica el tipo del blob resultante en vez de confiar en la llamada.
+ *
+ * Si el navegador no puede ni abrir la imagen (tipico con HEIC en Android o
+ * Chrome de escritorio), se intenta decodificar con libheif en WebAssembly.
  *
  * @param {File | Blob} archivo
  * @param {{calidad?: number, maxLado?: number, forzarWasm?: boolean}} [opciones]
@@ -31,9 +34,11 @@ export async function convertir(archivo, opciones = {}) {
     fuente.dibujar(contexto, objetivo.ancho, objetivo.alto);
 
     const blob = await codificar(lienzo, calidad, { forzarWasm });
+    const vistaOriginal = fuente.previsualizable ? null : await crearVistaPrevia(fuente, fuente.ancho, fuente.alto);
 
     return {
       blob,
+      vistaOriginal,
       ancho: objetivo.ancho,
       alto: objetivo.alto,
       original: { ancho: fuente.ancho, alto: fuente.alto },
@@ -65,6 +70,7 @@ async function decodificar(archivo) {
         return {
           ancho: bitmap.width,
           alto: bitmap.height,
+          previsualizable: true,
           dibujar: (contexto, ancho, alto) => contexto.drawImage(bitmap, 0, 0, ancho, alto),
           cerrar: () => bitmap.close?.(),
         };
@@ -74,7 +80,66 @@ async function decodificar(archivo) {
     }
   }
 
-  return decodificarConImagen(archivo);
+  try {
+    return await decodificarConImagen(archivo);
+  } catch (error) {
+    // Si el navegador no puede y el archivo es HEIC/HEIF, probamos libheif.
+    if (await esHeic(archivo)) {
+      return await decodificarConLibheif(archivo);
+    }
+    throw error;
+  }
+}
+
+/**
+ * Revisa la caja ISO-BMFF del archivo para saber si es HEIC/HEIF.
+ * @param {File | Blob} archivo
+ * @returns {Promise<boolean>}
+ */
+async function esHeic(archivo) {
+  try {
+    return esMarcaHeic(new Uint8Array(await archivo.slice(0, 16).arrayBuffer()));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Decodifica con libheif y devuelve la imagen como fuente dibujable.
+ * @param {File | Blob} archivo
+ */
+async function decodificarConLibheif(archivo) {
+  let decodificado;
+
+  try {
+    const buffer = await archivo.arrayBuffer();
+    const { decodificarHeic } = await import("../vendor/heic/decodificar.js");
+    decodificado = await decodificarHeic(buffer);
+  } catch {
+    throw crearError("DECODIFICAR");
+  }
+
+  const { ancho, alto, datos } = decodificado;
+
+  const lienzo = document.createElement("canvas");
+  lienzo.width = ancho;
+  lienzo.height = alto;
+
+  const contexto = lienzo.getContext("2d");
+  if (!contexto) throw crearError("SIN_CANVAS");
+
+  contexto.putImageData(new ImageData(new Uint8ClampedArray(datos), ancho, alto), 0, 0);
+
+  return {
+    ancho,
+    alto,
+    previsualizable: false,
+    dibujar: (destino, anchoDestino, altoDestino) => destino.drawImage(lienzo, 0, 0, anchoDestino, altoDestino),
+    cerrar: () => {
+      lienzo.width = 0;
+      lienzo.height = 0;
+    },
+  };
 }
 
 /**
@@ -99,6 +164,7 @@ async function decodificarConImagen(archivo) {
     return {
       ancho: imagen.naturalWidth,
       alto: imagen.naturalHeight,
+      previsualizable: true,
       dibujar: (contexto, ancho, alto) => contexto.drawImage(imagen, 0, 0, ancho, alto),
       cerrar: () => URL.revokeObjectURL(url),
     };
@@ -163,6 +229,28 @@ async function codificar(lienzo, calidad, { forzarWasm = false } = {}) {
   } catch {
     throw crearError("SIN_WEBP");
   }
+}
+
+/**
+ * Genera un JPEG chico para mostrar como "original" cuando el navegador no
+ * puede pintar el archivo (caso HEIC).
+ * @param {{dibujar: Function}} fuente
+ * @param {number} ancho
+ * @param {number} alto
+ * @returns {Promise<Blob | null>}
+ */
+async function crearVistaPrevia(fuente, ancho, alto) {
+  const limite = 720;
+  const escala = Math.min(1, limite / Math.max(ancho, alto));
+  const lienzo = document.createElement("canvas");
+  lienzo.width = Math.max(1, Math.round(ancho * escala));
+  lienzo.height = Math.max(1, Math.round(alto * escala));
+
+  const contexto = lienzo.getContext("2d");
+  if (!contexto) return null;
+
+  fuente.dibujar(contexto, lienzo.width, lienzo.height);
+  return new Promise((resolver) => lienzo.toBlob(resolver, "image/jpeg", 0.82));
 }
 
 /**
