@@ -12,7 +12,9 @@ export const MAX_PIXELES = 16_000_000;
  * @returns {{ok: true} | {ok: false, codigo: string, mensaje: string}}
  */
 export function validarArchivo(archivo) {
-  if (!archivo?.type || !archivo.type.startsWith("image/")) {
+  // Algunos sistemas entregan los HEIC sin tipo MIME: en ese caso dejamos pasar
+  // y que falle el decodificado con un mensaje util.
+  if (archivo?.type && !archivo.type.startsWith("image/")) {
     return { ok: false, codigo: "NO_ES_IMAGEN", mensaje: "Ese archivo no es una imagen." };
   }
 
@@ -65,7 +67,7 @@ const MENSAJES = {
   NO_ES_IMAGEN: "Ese archivo no es una imagen.",
   MUY_GRANDE: "La foto pesa demasiado. El maximo es 30 MB.",
   DECODIFICAR:
-    "No pudimos leer esta imagen. Si viene de un iPhone en HEIC, proba con JPG o activa Ajustes > Camara > Formatos > Mas compatible.",
+    "No pudimos leer esta imagen. Si viene de un iPhone en HEIC, proba otra vez o convertila a JPG desde Fotos.",
   SIN_WEBP: "Tu navegador no puede generar WebP todavia. Proba con Chrome o desde Android.",
   SIN_CANVAS: "Este navegador no puede procesar imagenes.",
 };
@@ -77,4 +79,20 @@ const MENSAJES = {
  */
 export function mensajeDeError(error) {
   return MENSAJES[error?.codigo] ?? "Algo salio mal al convertir. Proba con otra foto.";
+}
+
+const MARCAS_HEIC = new Set(["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"]);
+
+/**
+ * Revisa la cabecera ISO-BMFF y dice si el archivo es HEIC/HEIF.
+ * @param {Uint8Array} cabecera primeros bytes del archivo
+ * @returns {boolean}
+ */
+export function esMarcaHeic(cabecera) {
+  if (!(cabecera instanceof Uint8Array) || cabecera.length < 12) return false;
+
+  const ascii = (desde, hasta) => String.fromCharCode(...cabecera.slice(desde, hasta));
+  if (ascii(4, 8) !== "ftyp") return false;
+
+  return MARCAS_HEIC.has(ascii(8, 12));
 }

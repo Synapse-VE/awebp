@@ -44,6 +44,7 @@ const estado = {
   nombre: "foto.webp",
   token: 0,
   urls: [],
+  vistaOriginal: null,
 };
 
 const VISTAS = ["zona", "progreso", "resultado", "ajustes", "error"];
@@ -107,9 +108,15 @@ async function procesar({ silencioso = false } = {}) {
 function pintar(resultado) {
   limpiarUrls();
 
-  const urlOriginal = URL.createObjectURL(estado.archivo);
+  // La vista previa se conserva entre reconversiones: no va en estado.urls.
+  if (resultado.vistaOriginal && !estado.vistaOriginal) {
+    estado.vistaOriginal = URL.createObjectURL(resultado.vistaOriginal);
+  }
+
+  const urlOriginal = estado.vistaOriginal ?? URL.createObjectURL(estado.archivo);
   const urlWebp = URL.createObjectURL(resultado.blob);
-  estado.urls.push(urlOriginal, urlWebp);
+  if (!estado.vistaOriginal) estado.urls.push(urlOriginal);
+  estado.urls.push(urlWebp);
 
   el.vistaOriginal.src = urlOriginal;
   el.vistaWebp.src = urlWebp;
@@ -165,6 +172,7 @@ async function tomarArchivo(archivo) {
 
   estado.archivo = archivo;
   estado.blob = null;
+  estado.vistaOriginal = null;
   await procesar();
 }
 
@@ -196,6 +204,8 @@ function reiniciar() {
   estado.token += 1;
   estado.archivo = null;
   estado.blob = null;
+  if (estado.vistaOriginal) URL.revokeObjectURL(estado.vistaOriginal);
+  estado.vistaOriginal = null;
   limpiarUrls();
   el.vistaOriginal.removeAttribute("src");
   el.vistaWebp.removeAttribute("src");
