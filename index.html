@@ -65,12 +65,12 @@
         <p class="zona-nota">JPG, PNG, WebP o HEIC · se convierte al instante</p>
 
         <input id="archivo-camara" type="file" accept="image/*" capture="environment" hidden />
-        <input id="archivo-galeria" type="file" accept="image/*" hidden />
+        <input id="archivo-galeria" type="file" accept="image/*" multiple hidden />
       </section>
 
       <section id="progreso" class="tarjeta progreso" hidden aria-live="polite">
         <span class="spinner" aria-hidden="true"></span>
-        <p>Convirtiendo…</p>
+        <p id="progreso-texto">Convirtiendo…</p>
       </section>
 
       <section id="error" class="tarjeta error" role="alert" hidden>
@@ -125,6 +125,27 @@
         </div>
       </section>
 
+      <section id="lista" class="tarjeta lista" hidden>
+        <header class="lista-cabecera">
+          <h2 id="lista-titulo">Fotos</h2>
+          <p id="lista-resumen"></p>
+        </header>
+        <ul id="lista-items" class="items"></ul>
+        <p id="lista-aviso" class="lista-aviso" hidden></p>
+        <div class="acciones">
+          <button id="descargar-zip" class="boton primario" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Descargar todo (.zip)
+          </button>
+          <button id="agregar" class="boton" type="button">Agregar fotos</button>
+          <button id="otra-lista" class="boton fantasma" type="button">Empezar de nuevo</button>
+        </div>
+      </section>
+
       <section id="ajustes" class="tarjeta ajustes" hidden>
         <div class="ajuste">
           <label for="calidad">Calidad <output id="valor-calidad">80 %</output></label>
@@ -141,6 +162,8 @@
           </div>
         </div>
       </section>
+
+      <p id="aviso" class="aviso" role="status" hidden></p>
 
       <p class="privacidad">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">

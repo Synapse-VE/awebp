@@ -1,8 +1,12 @@
 import { convertir } from "./convertir.js";
 import { ahorroPorcentual, formatoBytes, nombreWebp } from "./formato.js";
 import { mensajeDeError, validarArchivo } from "./reglas.js";
+import { crearZip } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
+
+const MAX_ARCHIVOS = 10;
+const forzarWasm = new URLSearchParams(location.search).has("wasm");
 
 const el = {
   zona: $("zona"),
@@ -11,12 +15,19 @@ const el = {
   inputCamara: $("archivo-camara"),
   inputGaleria: $("archivo-galeria"),
   progreso: $("progreso"),
+  progresoTexto: $("progreso-texto"),
   resultado: $("resultado"),
+  lista: $("lista"),
+  listaTitulo: $("lista-titulo"),
+  listaResumen: $("lista-resumen"),
+  listaItems: $("lista-items"),
+  listaAviso: $("lista-aviso"),
   ajustes: $("ajustes"),
   error: $("error"),
   errorTitulo: $("error-titulo"),
   errorDetalle: $("error-detalle"),
   errorReintentar: $("error-reintentar"),
+  aviso: $("aviso"),
   vistaOriginal: $("vista-original"),
   vistaWebp: $("vista-webp"),
   pesoOriginal: $("peso-original"),
@@ -25,29 +36,29 @@ const el = {
   dimensiones: $("dimensiones"),
   calidadUsada: $("calidad-usada"),
   descargar: $("descargar"),
-  instalar: $("instalar"),
-  ayudaInstalar: $("ayuda-instalar"),
   compartir: $("compartir"),
   otra: $("otra"),
+  descargarZip: $("descargar-zip"),
+  agregar: $("agregar"),
+  otraLista: $("otra-lista"),
   calidad: $("calidad"),
   valorCalidad: $("valor-calidad"),
+  instalar: $("instalar"),
+  ayudaInstalar: $("ayuda-instalar"),
   chips: [...document.querySelectorAll(".chip")],
 };
 
-const forzarWasm = new URLSearchParams(location.search).has("wasm");
-
 const estado = {
-  archivo: null,
+  archivos: [],
+  resultados: [],
   calidad: 0.8,
   maxLado: 0,
-  blob: null,
-  nombre: "foto.webp",
   token: 0,
   urls: [],
-  vistaOriginal: null,
+  vistas: new Map(),
 };
 
-const VISTAS = ["zona", "progreso", "resultado", "ajustes", "error"];
+const VISTAS = ["zona", "progreso", "resultado", "lista", "ajustes", "error"];
 
 function ver(...visibles) {
   for (const vista of VISTAS) {
@@ -60,70 +71,166 @@ function limpiarUrls() {
   estado.urls = [];
 }
 
+function limpiarTodo() {
+  estado.token += 1;
+  estado.archivos = [];
+  estado.resultados = [];
+  limpiarUrls();
+  for (const url of estado.vistas.values()) URL.revokeObjectURL(url);
+  estado.vistas.clear();
+  el.inputCamara.value = "";
+  el.inputGaleria.value = "";
+}
+
+function marcarCargando(activo) {
+  el.resultado.classList.toggle("cargando", activo);
+  el.lista.classList.toggle("cargando", activo);
+}
+
+let temporizadorAviso;
+
+function mostrarAviso(texto) {
+  el.aviso.textContent = texto;
+  el.aviso.hidden = false;
+  clearTimeout(temporizadorAviso);
+  temporizadorAviso = setTimeout(() => {
+    el.aviso.hidden = true;
+  }, 7000);
+}
+
 function crearError(codigo) {
   const error = new Error(codigo);
   error.codigo = codigo;
   return error;
 }
 
-async function procesar({ silencioso = false } = {}) {
-  if (!estado.archivo) return;
+function descargarBlob(blob, nombre) {
+  const url = URL.createObjectURL(blob);
+  const enlace = document.createElement("a");
+  enlace.href = url;
+  enlace.download = nombre;
+  document.body.append(enlace);
+  enlace.click();
+  enlace.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 3000);
+}
 
-  const token = ++estado.token;
-
-  if (silencioso) {
-    el.resultado.classList.add("cargando");
-  } else {
-    ver("progreso");
-    el.progreso.setAttribute("aria-busy", "true");
+function nombreUnico(base, usados) {
+  if (!usados.has(base)) {
+    usados.add(base);
+    return base;
   }
 
+  const punto = base.lastIndexOf(".");
+  const raiz = punto > 0 ? base.slice(0, punto) : base;
+  const extension = punto > 0 ? base.slice(punto) : "";
+
+  let indice = 1;
+  let nombre;
+  do {
+    nombre = `${raiz}-${indice}${extension}`;
+    indice += 1;
+  } while (usados.has(nombre));
+
+  usados.add(nombre);
+  return nombre;
+}
+
+/* ---------- conversion ---------- */
+
+async function procesarTodo({ silencioso = false } = {}) {
+  if (estado.archivos.length === 0) return;
+
+  const token = ++estado.token;
+  const resultados = [];
+
+  if (silencioso) {
+    marcarCargando(true);
+  } else {
+    ver("progreso");
+  }
+
+  el.progreso.setAttribute("aria-busy", "true");
+
   try {
-    const resultado = await convertir(estado.archivo, {
-      calidad: estado.calidad,
-      maxLado: estado.maxLado,
-      forzarWasm,
-    });
+    for (const [indice, archivo] of estado.archivos.entries()) {
+      if (token !== estado.token) return;
 
-    if (token !== estado.token) return;
+      el.progresoTexto.textContent =
+        estado.archivos.length > 1
+          ? `Convirtiendo ${indice + 1} de ${estado.archivos.length}…`
+          : "Convirtiendo…";
 
-    estado.blob = resultado.blob;
-    estado.nombre = nombreWebp(estado.archivo.name || "foto");
+      try {
+        const resultado = await convertir(archivo, {
+          calidad: estado.calidad,
+          maxLado: estado.maxLado,
+          forzarWasm,
+        });
 
-    pintar(resultado);
-    ver("resultado", "ajustes");
+        if (resultado.vistaOriginal && !estado.vistas.has(archivo)) {
+          estado.vistas.set(archivo, URL.createObjectURL(resultado.vistaOriginal));
+        }
 
-    if (!silencioso) {
-      el.resultado.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        resultados.push({ archivo, ...resultado });
+      } catch (error) {
+        resultados.push({ archivo, error: error?.codigo ?? "DESCONOCIDO" });
+      }
     }
-  } catch (error) {
+
     if (token !== estado.token) return;
-    mostrarError(error.codigo ?? "DESCONOCIDO", mensajeDeError(error));
+
+    estado.resultados = resultados;
+    pintarTodo({ desplazar: !silencioso });
   } finally {
-    el.resultado.classList.remove("cargando");
+    marcarCargando(false);
     el.progreso.setAttribute("aria-busy", "false");
   }
 }
 
-function pintar(resultado) {
-  limpiarUrls();
+function pintarTodo({ desplazar = false } = {}) {
+  const validos = estado.resultados.filter((resultado) => !resultado.error);
+  const errores = estado.resultados.filter((resultado) => resultado.error);
 
-  // La vista previa se conserva entre reconversiones: no va en estado.urls.
-  if (resultado.vistaOriginal && !estado.vistaOriginal) {
-    estado.vistaOriginal = URL.createObjectURL(resultado.vistaOriginal);
+  if (validos.length === 0) {
+    mostrarError(errores[0]?.error ?? "DESCONOCIDO");
+    return;
   }
 
-  const urlOriginal = estado.vistaOriginal ?? URL.createObjectURL(estado.archivo);
+  if (validos.length === 1 && errores.length === 0) {
+    pintarIndividual(validos[0]);
+    ver("resultado", "ajustes");
+    if (desplazar) el.resultado.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    return;
+  }
+
+  pintarLista(validos, errores);
+  ver("lista", "ajustes");
+  if (desplazar) el.lista.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+function urlOriginalDe(archivo) {
+  const vista = estado.vistas.get(archivo);
+  if (vista) return vista;
+
+  const url = URL.createObjectURL(archivo);
+  estado.urls.push(url);
+  return url;
+}
+
+function pintarIndividual(resultado) {
+  limpiarUrls();
+
+  const urlOriginal = urlOriginalDe(resultado.archivo);
   const urlWebp = URL.createObjectURL(resultado.blob);
-  if (!estado.vistaOriginal) estado.urls.push(urlOriginal);
   estado.urls.push(urlWebp);
 
   el.vistaOriginal.src = urlOriginal;
   el.vistaWebp.src = urlWebp;
-  el.pesoOriginal.textContent = formatoBytes(estado.archivo.size);
+  el.pesoOriginal.textContent = formatoBytes(resultado.archivo.size);
   el.pesoWebp.textContent = formatoBytes(resultado.blob.size);
 
-  const ahorro = ahorroPorcentual(estado.archivo.size, resultado.blob.size);
+  const ahorro = ahorroPorcentual(resultado.archivo.size, resultado.blob.size);
   if (ahorro > 0) {
     el.ahorro.textContent = `−${ahorro} % de peso`;
   } else if (ahorro === 0) {
@@ -139,12 +246,78 @@ function pintar(resultado) {
   actualizarCompartir();
 }
 
+function pintarLista(validos, errores) {
+  limpiarUrls();
+  el.listaItems.replaceChildren();
+
+  let totalOriginal = 0;
+  let totalWebp = 0;
+
+  for (const resultado of validos) {
+    totalOriginal += resultado.archivo.size;
+    totalWebp += resultado.blob.size;
+
+    const fila = document.createElement("li");
+    fila.className = "item";
+
+    const miniatura = document.createElement("img");
+    miniatura.className = "item-thumb";
+    miniatura.src = urlOriginalDe(resultado.archivo);
+    miniatura.alt = "";
+    miniatura.loading = "lazy";
+
+    const datos = document.createElement("div");
+    const nombre = document.createElement("p");
+    nombre.className = "item-nombre";
+    nombre.textContent = resultado.archivo.name || "foto";
+
+    const peso = document.createElement("p");
+    peso.className = "item-peso";
+    peso.append(`${formatoBytes(resultado.archivo.size)} → ${formatoBytes(resultado.blob.size)} · `);
+
+    const ahorro = document.createElement("strong");
+    const porcentaje = ahorroPorcentual(resultado.archivo.size, resultado.blob.size);
+    ahorro.textContent = porcentaje >= 0 ? `−${porcentaje} %` : `+${Math.abs(porcentaje)} %`;
+    peso.append(ahorro);
+
+    datos.append(nombre, peso);
+
+    const boton = document.createElement("button");
+    boton.className = "boton item-boton";
+    boton.type = "button";
+    boton.textContent = "Descargar";
+    boton.addEventListener("click", () => {
+      descargarBlob(resultado.blob, nombreWebp(resultado.archivo.name || "foto"));
+    });
+
+    fila.append(miniatura, datos, boton);
+    el.listaItems.append(fila);
+  }
+
+  const cantidad = validos.length;
+  el.listaTitulo.textContent = `${cantidad} ${cantidad === 1 ? "foto" : "fotos"}`;
+
+  const ahorroTotal = ahorroPorcentual(totalOriginal, totalWebp);
+  const signo = ahorroTotal >= 0 ? "−" : "+";
+  el.listaResumen.textContent = `${formatoBytes(totalOriginal)} → ${formatoBytes(totalWebp)} · ${signo}${Math.abs(ahorroTotal)} % de peso`;
+
+  if (errores.length > 0) {
+    el.listaAviso.textContent = `${errores.length} ${errores.length === 1 ? "foto no se pudo" : "fotos no se pudieron"} convertir.`;
+    el.listaAviso.hidden = false;
+  } else {
+    el.listaAviso.hidden = true;
+  }
+}
+
 function actualizarCompartir() {
+  const resultado = estado.resultados[0];
   let puede = false;
 
-  if (estado.blob && typeof navigator.canShare === "function") {
+  if (resultado?.blob && typeof navigator.canShare === "function") {
     try {
-      const archivo = new File([estado.blob], estado.nombre, { type: "image/webp" });
+      const archivo = new File([resultado.blob], nombreWebp(resultado.archivo.name || "foto"), {
+        type: "image/webp",
+      });
       puede = navigator.canShare({ files: [archivo] });
     } catch {
       puede = false;
@@ -154,46 +327,64 @@ function actualizarCompartir() {
   el.compartir.hidden = !puede;
 }
 
-function mostrarError(codigo, mensaje) {
-  estado.archivo = null;
+function mostrarError(codigo) {
   el.errorTitulo.textContent = codigo === "MUY_GRANDE" ? "La foto es muy grande" : "No se pudo convertir";
-  el.errorDetalle.textContent = mensaje;
+  el.errorDetalle.textContent = mensajeDeError({ codigo });
   ver("error");
 }
 
-async function tomarArchivo(archivo) {
-  if (!archivo) return;
+async function agregarArchivos(lista) {
+  const avisos = [];
 
-  const revision = validarArchivo(archivo);
-  if (!revision.ok) {
-    mostrarError(revision.codigo, revision.mensaje);
-    return;
+  for (const archivo of lista) {
+    if (estado.archivos.length >= MAX_ARCHIVOS) {
+      avisos.push(`Máximo ${MAX_ARCHIVOS} fotos por tanda.`);
+      break;
+    }
+
+    const revision = validarArchivo(archivo);
+    if (!revision.ok) {
+      avisos.push(`${archivo.name || "archivo"}: ${revision.mensaje}`);
+      continue;
+    }
+
+    estado.archivos.push(archivo);
   }
 
-  estado.archivo = archivo;
-  estado.blob = null;
-  estado.vistaOriginal = null;
-  await procesar();
+  if (avisos.length > 0) mostrarAviso(avisos.join(" "));
+  if (estado.archivos.length > 0) await procesarTodo();
 }
 
-async function descargar() {
-  if (!estado.blob) return;
+/* ---------- acciones ---------- */
 
-  const url = URL.createObjectURL(estado.blob);
-  const enlace = document.createElement("a");
-  enlace.href = url;
-  enlace.download = estado.nombre;
-  document.body.append(enlace);
-  enlace.click();
-  enlace.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+function descargarUna() {
+  const resultado = estado.resultados.find((candidato) => !candidato.error);
+  if (!resultado) return;
+
+  descargarBlob(resultado.blob, nombreWebp(resultado.archivo.name || "foto"));
+}
+
+async function descargarZip() {
+  const validos = estado.resultados.filter((resultado) => !resultado.error);
+  const usados = new Set();
+  const entradas = [];
+
+  for (const resultado of validos) {
+    const nombre = nombreUnico(nombreWebp(resultado.archivo.name || "foto"), usados);
+    entradas.push({ nombre, datos: new Uint8Array(await resultado.blob.arrayBuffer()) });
+  }
+
+  descargarBlob(crearZip(entradas), "awebp.zip");
 }
 
 async function compartir() {
-  if (!estado.blob) return;
+  const resultado = estado.resultados[0];
+  if (!resultado?.blob) return;
 
   try {
-    const archivo = new File([estado.blob], estado.nombre, { type: "image/webp" });
+    const archivo = new File([resultado.blob], nombreWebp(resultado.archivo.name || "foto"), {
+      type: "image/webp",
+    });
     await navigator.share({ files: [archivo], title: "Foto en WebP" });
   } catch {
     // Cancelar el menu de compartir no es un error.
@@ -201,26 +392,11 @@ async function compartir() {
 }
 
 function reiniciar() {
-  estado.token += 1;
-  estado.archivo = null;
-  estado.blob = null;
-  if (estado.vistaOriginal) URL.revokeObjectURL(estado.vistaOriginal);
-  estado.vistaOriginal = null;
-  limpiarUrls();
-  el.vistaOriginal.removeAttribute("src");
-  el.vistaWebp.removeAttribute("src");
-  el.inputCamara.value = "";
-  el.inputGaleria.value = "";
+  limpiarTodo();
   ver("zona");
 }
 
-let temporizador;
-
-function reprogramar() {
-  if (!estado.archivo) return;
-  clearTimeout(temporizador);
-  temporizador = setTimeout(() => procesar({ silencioso: true }), 220);
-}
+/* ---------- entrada ---------- */
 
 function traeArchivos(evento) {
   return Boolean(evento.dataTransfer?.types?.includes("Files"));
@@ -250,8 +426,7 @@ window.addEventListener("drop", (evento) => {
   evento.preventDefault();
   profundidadArrastre = 0;
   document.body.classList.remove("recibiendo");
-  const [archivo] = evento.dataTransfer.files ?? [];
-  tomarArchivo(archivo);
+  agregarArchivos([...evento.dataTransfer.files]);
 });
 
 window.addEventListener("paste", (evento) => {
@@ -269,11 +444,12 @@ window.addEventListener("paste", (evento) => {
   if (!archivo) return;
 
   evento.preventDefault();
-  tomarArchivo(archivo);
+  agregarArchivos([archivo]);
 });
 
 el.botonCamara.addEventListener("click", () => el.inputCamara.click());
 el.botonElegir.addEventListener("click", () => el.inputGaleria.click());
+el.agregar.addEventListener("click", () => el.inputGaleria.click());
 
 el.zona.addEventListener("click", (evento) => {
   if (evento.target.closest("button")) return;
@@ -282,9 +458,18 @@ el.zona.addEventListener("click", (evento) => {
 
 for (const input of [el.inputCamara, el.inputGaleria]) {
   input.addEventListener("change", () => {
-    const [archivo] = input.files ?? [];
-    tomarArchivo(archivo);
+    const archivos = [...(input.files ?? [])];
+    input.value = "";
+    agregarArchivos(archivos);
   });
+}
+
+let temporizador;
+
+function reprogramar() {
+  if (estado.archivos.length === 0) return;
+  clearTimeout(temporizador);
+  temporizador = setTimeout(() => procesarTodo({ silencioso: true }), 220);
 }
 
 el.calidad.addEventListener("input", () => {
@@ -305,12 +490,12 @@ for (const chip of el.chips) {
   });
 }
 
-el.descargar.addEventListener("click", descargar);
+el.descargar.addEventListener("click", descargarUna);
+el.descargarZip.addEventListener("click", descargarZip);
 el.compartir.addEventListener("click", compartir);
 el.otra.addEventListener("click", reiniciar);
+el.otraLista.addEventListener("click", reiniciar);
 el.errorReintentar.addEventListener("click", reiniciar);
-
-ver("zona");
 
 /* ---------- PWA ---------- */
 
@@ -343,7 +528,6 @@ el.instalar.addEventListener("click", async () => {
     return;
   }
 
-  // En iPhone no existe el prompt: mostramos las instrucciones.
   el.ayudaInstalar.hidden = !el.ayudaInstalar.hidden;
 });
 
@@ -358,3 +542,5 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+
+ver("zona");
