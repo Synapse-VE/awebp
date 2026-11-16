@@ -22,3 +22,16 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
       - run: node --test test/*.test.js
+
+  e2e:
+    name: e2e (chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Google Chrome disponible
+        run: google-chrome --version
+      - name: Prueba de punta a punta
+        run: node tools/e2e.mjs mobile input
