@@ -1,27 +1,32 @@
 #!/usr/bin/env node
 /**
  * Prueba de punta a punta con el protocolo de DevTools de Chrome.
- * Levanta el sitio, sube una foto real por el input y verifica el resultado.
+ *
+ * Modos: input (por el input de archivo), wasm (fuerza el encoder WebAssembly),
+ * heic (archivo HEIC real), drop (arrastrar), paste (pegar) y multi (tres fotos
+ * y descarga del ZIP). Con AWEBP_URL apunta al sitio publicado en vez de
+ * levantar uno local.
  */
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const PUERTO_SITIO = 8099;
-let PUERTO_CDP = 0;
+const PUERTO_CDP_FIJO = 0;
 const URL_EXTERNA = process.env.AWEBP_URL ?? "";
 const URL_BASE = URL_EXTERNA || `http://127.0.0.1:${PUERTO_SITIO}/`;
-const FIXTURE = resolve("tools/fixtures/foto.jpg");
+
 const SHOT = process.argv[2] ?? "mobile";
 const MODO = process.argv[3] ?? "input";
 const PROBAR_OFFLINE = process.argv.includes("offline");
 const EXTRA = MODO === "wasm" ? "?wasm=1" : "";
 const ANCHO = SHOT === "desktop" ? 1200 : 430;
 const ALTO = SHOT === "desktop" ? 900 : 932;
+const DESCARGAS = resolve(".shots/descargas");
 
 const dormir = (ms) => new Promise((r) => setTimeout(r, ms));
-mkdirSync(".shots", { recursive: true });
+mkdirSync(DESCARGAS, { recursive: true });
 
 async function esperarJson(url, intentos = 60) {
   for (let i = 0; i < intentos; i += 1) {
@@ -75,6 +80,25 @@ async function conectar(url) {
   return new CDP(ws);
 }
 
+/** Genera una foto JPEG en el navegador (sirve local y contra el sitio). */
+function generadorFoto({ ancho = 1600, alto = 1200, tono = "#22d3ee" } = {}) {
+  return `(async () => {
+    const lienzo = document.createElement("canvas");
+    lienzo.width = ${ancho};
+    lienzo.height = ${alto};
+    const contexto = lienzo.getContext("2d");
+    const degradado = contexto.createLinearGradient(0, 0, ${ancho}, ${alto});
+    degradado.addColorStop(0, "${tono}");
+    degradado.addColorStop(1, "#f472b6");
+    contexto.fillStyle = degradado;
+    contexto.fillRect(0, 0, ${ancho}, ${alto});
+    contexto.fillStyle = "#ffffff";
+    contexto.fillRect(80, 80, 400, 120);
+    const blob = await new Promise((r) => lienzo.toBlob(r, "image/jpeg", 0.92));
+    return new File([blob], "foto.jpg", { type: "image/jpeg" });
+  })()`;
+}
+
 const sitio = URL_EXTERNA
   ? null
   : spawn("python3", ["-m", "http.server", String(PUERTO_SITIO), "--bind", "127.0.0.1"], { stdio: "ignore" });
@@ -87,7 +111,7 @@ const chrome = spawn(
     "--no-sandbox",
     "--disable-gpu",
     "--hide-scrollbars",
-    "--remote-debugging-port=0",
+    `--remote-debugging-port=${PUERTO_CDP_FIJO}`,
     `--user-data-dir=${perfil}`,
     `--window-size=${ANCHO},${ALTO}`,
     URL_BASE + EXTRA,
@@ -101,23 +125,29 @@ let cdp;
 try {
   // Chrome escribe el puerto real en DevToolsActivePort.
   const archivoPuerto = join(perfil, "DevToolsActivePort");
+  let puerto = 0;
   for (let i = 0; i < 80; i += 1) {
     try {
       const [linea] = readFileSync(archivoPuerto, "utf8").split("\n");
-      if (linea) { PUERTO_CDP = Number(linea); break; }
+      if (linea) {
+        puerto = Number(linea);
+        break;
+      }
     } catch {
       /* todavia no existe */
     }
     await dormir(150);
   }
-  if (!PUERTO_CDP) throw new Error("Chrome no levanto el puerto de depuracion");
+  if (!puerto) throw new Error("Chrome no levanto el puerto de depuracion");
 
-  await esperarJson(`http://127.0.0.1:${PUERTO_CDP}/json/version`);
-  const lista = await esperarJson(`http://127.0.0.1:${PUERTO_CDP}/json/list`);
-  const pagina = lista.find((objetivo) => objetivo.type === "page" && objetivo.url.startsWith(URL_BASE)) ?? lista.find((objetivo) => objetivo.type === "page");
+  await esperarJson(`http://127.0.0.1:${puerto}/json/version`);
+  const lista = await esperarJson(`http://127.0.0.1:${puerto}/json/list`);
+  const pagina =
+    lista.find((objetivo) => objetivo.type === "page" && objetivo.url.startsWith(URL_BASE)) ??
+    lista.find((objetivo) => objetivo.type === "page");
   if (!pagina) throw new Error("no encontre la pestana");
-  cdp = await conectar(pagina.webSocketDebuggerUrl);
 
+  cdp = await conectar(pagina.webSocketDebuggerUrl);
   await cdp.enviar("Page.enable");
   await cdp.enviar("Runtime.enable");
 
@@ -131,7 +161,6 @@ try {
     return result?.value;
   };
 
-  // Esperamos a que el DOM y el modulo esten listos de verdad.
   let listo = false;
   for (let i = 0; i < 80; i += 1) {
     listo = await evaluar(
@@ -142,47 +171,38 @@ try {
   }
   if (!listo) throw new Error("la pagina no termino de cargar");
 
-  // El HEIC necesita un archivo real; el resto se genera en el navegador para
-  // poder correr la misma prueba contra localhost o contra la URL publicada.
-  const datosDelEvento = MODO === "heic"
-    ? `(async () => {
-        const respuesta = await fetch("./tools/fixtures/ejemplo.heic");
-        const blob = await respuesta.blob();
-        return new File([blob], "ejemplo.heic", { type: "image/heic" });
-      })()`
-    : `(async () => {
-        const lienzo = document.createElement("canvas");
-        lienzo.width = 1600;
-        lienzo.height = 1200;
-        const contexto = lienzo.getContext("2d");
-        const degradado = contexto.createLinearGradient(0, 0, 1600, 1200);
-        degradado.addColorStop(0, "#22d3ee");
-        degradado.addColorStop(1, "#f472b6");
-        contexto.fillStyle = degradado;
-        contexto.fillRect(0, 0, 1600, 1200);
-        contexto.fillStyle = "#ffffff";
-        contexto.fillRect(100, 100, 400, 120);
-        const blob = await new Promise((r) => lienzo.toBlob(r, "image/jpeg", 0.92));
-        return new File([blob], "foto.jpg", { type: "image/jpeg" });
-      })()`;
-
-  if (MODO === "input" || MODO === "wasm" || MODO === "heic") {
+  const inyectar = async (expresionArchivos) => {
     const ok = await evaluar(`(async () => {
-      const archivo = await ${datosDelEvento};
+      const archivos = await ${expresionArchivos};
       const datos = new DataTransfer();
-      datos.items.add(archivo);
+      for (const archivo of archivos) datos.items.add(archivo);
       const input = document.getElementById("archivo-galeria");
       input.files = datos.files;
       input.dispatchEvent(new Event("change", { bubbles: true }));
       return true;
     })()`, { awaitPromise: true });
     if (!ok) throw new Error("no se pudo inyectar el archivo");
+  };
+
+  if (MODO === "input" || MODO === "wasm") {
+    await inyectar(`(async () => [await ${generadorFoto()}])()`);
+  } else if (MODO === "heic") {
+    await inyectar(`(async () => {
+      const blob = await (await fetch("./tools/fixtures/ejemplo.heic")).blob();
+      return [new File([blob], "ejemplo.heic", { type: "image/heic" })];
+    })()`);
+  } else if (MODO === "multi") {
+    await inyectar(`(async () => {
+      const uno = await ${generadorFoto({ ancho: 1600, alto: 1200, tono: "#22d3ee" })};
+      const dos = await ${generadorFoto({ ancho: 1200, alto: 900, tono: "#38bdf8" })};
+      const tres = await ${generadorFoto({ ancho: 1000, alto: 1000, tono: "#34d399" })};
+      return [uno, dos, tres].map((archivo, indice) => new File([archivo], \`foto-\${indice + 1}.jpg\`, { type: "image/jpeg" }));
+    })()`);
   } else {
     const tipoEvento = MODO === "drop" ? "DragEvent" : "ClipboardEvent";
     const campoDatos = MODO === "drop" ? "dataTransfer" : "clipboardData";
     const ok = await evaluar(`(async () => {
-      const blob = await (await fetch("./tools/fixtures/foto.jpg")).blob();
-      const archivo = new File([blob], "foto.jpg", { type: "image/jpeg" });
+      const archivo = await ${generadorFoto()};
       const datos = new DataTransfer();
       datos.items.add(archivo);
       const evento = new ${tipoEvento}("${MODO}", { bubbles: true, cancelable: true });
@@ -195,111 +215,123 @@ try {
     if (!ok) throw new Error("no se pudo simular el evento");
   }
 
-  console.log("estado tras inyectar:", await evaluar(`JSON.stringify({
-    archivos: document.getElementById("archivo-galeria").files.length,
-    progreso: !document.getElementById("progreso").hidden,
-    resultado: !document.getElementById("resultado").hidden,
-  })`));
-
-  let visible = false;
-  for (let i = 0; i < 100; i += 1) {
-    visible = await evaluar("!document.getElementById('resultado').hidden");
-    if (visible) break;
-    await dormir(150);
-  }
-  if (!visible) {
-    const detalle = await evaluar(`JSON.stringify({
-      url: location.href,
-      titulo: document.title,
-      texto: document.body ? document.body.innerText.slice(0, 240) : "sin body",
-      error: (document.getElementById("error") || {}).hidden === false
-        ? document.getElementById("error-detalle").textContent
-        : "sin error",
-    })`);
-    throw new Error(`no aparecio el resultado (${detalle})`);
-  }
-
-  await dormir(600);
-
-  const datos = await evaluar(`(async () => {
-    const src = document.getElementById("vista-webp").src;
-    const blob = await (await fetch(src)).blob();
-    return {
-      tipo: blob.type,
-      pesoWebp: blob.size,
-      pesoOriginal: document.getElementById("peso-original").textContent,
-      pesoWebpTexto: document.getElementById("peso-webp").textContent,
-      ahorro: document.getElementById("ahorro").textContent,
-      dimensiones: document.getElementById("dimensiones").textContent,
-      calidad: document.getElementById("calidad-usada").textContent,
-    };
-  })()`, { awaitPromise: true });
-
-  console.log(JSON.stringify(datos, null, 2));
-
-  if (datos.tipo !== "image/webp") throw new Error(`el blob salio como ${datos.tipo}`);
-  if (!(datos.pesoWebp > 0)) throw new Error("el blob salio vacio");
-
-  // La vista previa del original tiene que cargar (clave en HEIC).
-  const previa = await evaluar(`(async () => {
-    const imagen = document.getElementById("vista-original");
-    if (!imagen.src) return "sin src";
-    try {
-      await imagen.decode();
-      return imagen.naturalWidth > 0 ? "ok" : "vacia";
-    } catch {
-      return "error";
-    }
-  })()`, { awaitPromise: true });
-  if (previa !== "ok") throw new Error(`la vista previa del original no carga: ${previa}`);
-
-  // Cambiar la calidad tiene que reconvertir sin refrescar la pagina.
-  await evaluar(`(() => {
-    const control = document.getElementById("calidad");
-    control.value = "50";
-    control.dispatchEvent(new Event("input", { bubbles: true }));
-    return true;
-  })()`);
-
-  const esperarQuieto = async () => {
-    for (let i = 0; i < 80; i += 1) {
-      const cargando = await evaluar("document.getElementById('resultado').classList.contains('cargando')");
-      if (!cargando) return true;
-      await dormir(120);
+  const esperar = async (condicion, intentos = 140) => {
+    for (let i = 0; i < intentos; i += 1) {
+      if (await evaluar(condicion)) return true;
+      await dormir(150);
     }
     return false;
   };
 
-  await dormir(700);
-  await esperarQuieto();
-  const trasCalidad = await evaluar(`({
-    peso: document.getElementById("peso-webp").textContent,
-    calidad: document.getElementById("calidad-usada").textContent,
-  })`);
-  console.log("calidad 50%:", JSON.stringify(trasCalidad));
-  if (trasCalidad.calidad !== "50 %") throw new Error("la calidad no se aplico");
+  if (MODO === "multi") {
+    if (!(await esperar("!document.getElementById('lista').hidden"))) {
+      const detalle = await evaluar("document.body.innerText.slice(0, 240)");
+      throw new Error(`no aparecio la lista (${detalle})`);
+    }
 
-  // Elegir 800 px tiene que redimensionar.
-  await evaluar(`(() => {
-    document.querySelector('.chip[data-max="800"]').click();
-    return true;
-  })()`);
-  await dormir(700);
-  await esperarQuieto();
-  const trasTamano = await evaluar("document.getElementById('dimensiones').textContent");
-  console.log("max 800:", trasTamano);
-  const medidas = trasTamano.match(/^(\d+) × (\d+) px$/);
-  if (!medidas || Number(medidas[1]) !== 800) throw new Error(`tamano inesperado: ${trasTamano}`);
-  if (Number(medidas[2]) % 2 !== 0) throw new Error(`alto raro: ${trasTamano}`);
+    const datos = await evaluar(`({
+      items: document.querySelectorAll("#lista-items .item").length,
+      titulo: document.getElementById("lista-titulo").textContent,
+      resumen: document.getElementById("lista-resumen").textContent,
+    })`);
+    console.log("lista:", JSON.stringify(datos));
+    if (datos.items !== 3) throw new Error(`se esperaban 3 fotos y hay ${datos.items}`);
 
-  const metricas = await cdp.enviar("Page.getLayoutMetrics");
-  const { width, height } = metricas.cssContentSize;
-  const captura = await cdp.enviar("Page.captureScreenshot", {
-    format: "png",
-    captureBeyondViewport: true,
-    clip: { x: 0, y: 0, width, height, scale: 1 },
-  });
-  writeFileSync(`.shots/e2e-${SHOT}-${MODO}.png`, Buffer.from(captura.data, "base64"));
+    await cdp.enviar("Page.setDownloadBehavior", { behavior: "allow", downloadPath: DESCARGAS }).catch(
+      () => cdp.enviar("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: DESCARGAS }),
+    );
+
+    await evaluar(`document.getElementById("descargar-zip").click()`);
+
+    const zip = join(DESCARGAS, "awebp.zip");
+    for (let i = 0; i < 80; i += 1) {
+      if (existsSync(zip)) break;
+      await dormir(150);
+    }
+    if (!existsSync(zip)) throw new Error("no se descargo el zip");
+
+    const bytes = readFileSync(zip);
+    const fin = bytes.length - 22;
+    const entradas = bytes.readUInt16LE(fin + 10);
+    console.log("zip:", statSync(zip).size, "bytes,", entradas, "entradas");
+    if (entradas !== 3) throw new Error(`el zip tiene ${entradas} entradas`);
+  } else {
+    if (!(await esperar("!document.getElementById('resultado').hidden"))) {
+      const detalle = await evaluar(`JSON.stringify({
+        url: location.href,
+        texto: document.body ? document.body.innerText.slice(0, 200) : "sin body",
+        error: (document.getElementById("error") || {}).hidden === false
+          ? document.getElementById("error-detalle").textContent
+          : "sin error",
+      })`);
+      throw new Error(`no aparecio el resultado (${detalle})`);
+    }
+
+    await dormir(400);
+
+    const previa = await evaluar(`(async () => {
+      const imagen = document.getElementById("vista-original");
+      if (!imagen.src) return "sin src";
+      try {
+        await imagen.decode();
+        return imagen.naturalWidth > 0 ? "ok" : "vacia";
+      } catch {
+        return "error";
+      }
+    })()`, { awaitPromise: true });
+    if (previa !== "ok") throw new Error(`la vista previa del original no carga: ${previa}`);
+
+    const datos = await evaluar(`(async () => {
+      const src = document.getElementById("vista-webp").src;
+      const blob = await (await fetch(src)).blob();
+      return {
+        tipo: blob.type,
+        pesoWebp: blob.size,
+        pesoOriginal: document.getElementById("peso-original").textContent,
+        ahorro: document.getElementById("ahorro").textContent,
+        dimensiones: document.getElementById("dimensiones").textContent,
+        calidad: document.getElementById("calidad-usada").textContent,
+      };
+    })()`, { awaitPromise: true });
+
+    console.log(JSON.stringify(datos, null, 2));
+    if (datos.tipo !== "image/webp") throw new Error(`el blob salio como ${datos.tipo}`);
+    if (!(datos.pesoWebp > 0)) throw new Error("el blob salio vacio");
+
+    // Cambiar la calidad tiene que reconvertir sin refrescar la pagina.
+    await evaluar(`(() => {
+      const control = document.getElementById("calidad");
+      control.value = "50";
+      control.dispatchEvent(new Event("input", { bubbles: true }));
+      return true;
+    })()`);
+
+    const esperarQuieto = async () => {
+      for (let i = 0; i < 80; i += 1) {
+        const cargando = await evaluar("document.getElementById('resultado').classList.contains('cargando')");
+        if (!cargando) return true;
+        await dormir(120);
+      }
+      return false;
+    };
+
+    await dormir(500);
+    await esperarQuieto();
+    const trasCalidad = await evaluar(`({
+      peso: document.getElementById("peso-webp").textContent,
+      calidad: document.getElementById("calidad-usada").textContent,
+    })`);
+    console.log("calidad 50%:", JSON.stringify(trasCalidad));
+    if (trasCalidad.calidad !== "50 %") throw new Error("la calidad no se aplico");
+
+    await evaluar(`document.querySelector('.chip[data-max="800"]').click()`);
+    await dormir(500);
+    await esperarQuieto();
+    const trasTamano = await evaluar("document.getElementById('dimensiones').textContent");
+    console.log("max 800:", trasTamano);
+    const medidas = trasTamano.match(/^(\d+) × (\d+) px$/);
+    if (!medidas || Number(medidas[1]) !== 800) throw new Error(`tamano inesperado: ${trasTamano}`);
+  }
 
   if (PROBAR_OFFLINE && sitio) {
     const pwa = await evaluar(`(async () => {
@@ -310,9 +342,8 @@ try {
     console.log("pwa:", JSON.stringify(pwa));
     if (!pwa.registros) throw new Error("no se registro el service worker");
 
-    sitio?.kill("SIGKILL");
+    sitio.kill("SIGKILL");
     await dormir(900);
-
     await cdp.enviar("Page.reload", { ignoreCache: false });
     await dormir(2500);
 
@@ -321,16 +352,22 @@ try {
     console.log("offline OK");
   }
 
-  console.log(`OK ${SHOT}`);
+  const metricas = await cdp.enviar("Page.getLayoutMetrics");
+  const { width, height } = metricas.cssContentSize;
+  const captura = await cdp.enviar("Page.captureScreenshot", {
+    format: "png",
+    captureBeyondViewport: true,
+    clip: { x: 0, y: 0, width, height, scale: 1 },
+  });
+  writeFileSync(`.shots/e2e-${SHOT}-${MODO}.png`, Buffer.from(captura.data, "base64"));
+
+  console.log(`OK ${SHOT} ${MODO}`);
   salida = 0;
 } catch (error) {
   console.error(`FALLO: ${error.message}`);
-  for (const evento of eventos.slice(-8)) {
+  for (const evento of eventos.slice(-6)) {
     if (evento.method === "Runtime.exceptionThrown") {
-      console.error("excepcion:", JSON.stringify(evento.params.exceptionDetails).slice(0, 400));
-    }
-    if (evento.method === "Runtime.consoleAPICalled") {
-      console.error("console:", evento.params.args?.map((a) => a.value ?? a.description).join(" ").slice(0, 300));
+      console.error("excepcion:", JSON.stringify(evento.params.exceptionDetails).slice(0, 300));
     }
   }
 } finally {

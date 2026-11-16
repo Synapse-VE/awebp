@@ -588,3 +588,108 @@ body.recibiendo::after {
   font-size: 0.82rem;
   text-align: center;
 }
+
+/* ---------- varias fotos ---------- */
+
+.lista-cabecera h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.lista-cabecera p {
+  margin: 2px 0 0;
+  color: var(--apagado);
+  font-size: 0.85rem;
+}
+
+.items {
+  display: grid;
+  gap: 10px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  background: var(--superficie-2);
+}
+
+.item-thumb {
+  width: 56px;
+  height: 56px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--fondo);
+}
+
+.item-nombre {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.item-peso {
+  margin: 2px 0 0;
+  font-size: 0.78rem;
+  color: var(--apagado);
+}
+
+.item-peso strong {
+  color: var(--exito);
+}
+
+.item-boton {
+  min-height: 40px;
+  padding: 8px 12px;
+  font-size: 0.8rem;
+}
+
+.lista-aviso {
+  margin: 12px 0 0;
+  color: var(--error);
+  font-size: 0.8rem;
+}
+
+.lista.cargando {
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.lista.cargando .acciones {
+  pointer-events: none;
+}
+
+.aviso {
+  margin: 14px 0 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 12px;
+  background: rgba(248, 113, 113, 0.08);
+  color: var(--texto);
+  font-size: 0.82rem;
+}
+
+@media (max-width: 380px) {
+  .item {
+    grid-template-columns: 44px minmax(0, 1fr);
+  }
+
+  .item-thumb {
+    width: 44px;
+    height: 44px;
+  }
+
+  .item-boton {
+    grid-column: 1 / -1;
+  }
+}
