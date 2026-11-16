@@ -574,3 +574,17 @@ body.recibiendo::after {
   pointer-events: none;
   animation: aparecer 0.15s ease both;
 }
+
+/* ---------- instalacion ---------- */
+
+.ayuda-instalar {
+  max-width: 720px;
+  margin: 12px auto 0;
+  padding: 10px 14px;
+  border: 1px solid rgba(45, 212, 191, 0.32);
+  border-radius: 12px;
+  background: rgba(45, 212, 191, 0.08);
+  color: var(--texto);
+  font-size: 0.82rem;
+  text-align: center;
+}

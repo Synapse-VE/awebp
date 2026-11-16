@@ -25,6 +25,8 @@ const el = {
   dimensiones: $("dimensiones"),
   calidadUsada: $("calidad-usada"),
   descargar: $("descargar"),
+  instalar: $("instalar"),
+  ayudaInstalar: $("ayuda-instalar"),
   compartir: $("compartir"),
   otra: $("otra"),
   calidad: $("calidad"),
@@ -299,3 +301,50 @@ el.otra.addEventListener("click", reiniciar);
 el.errorReintentar.addEventListener("click", reiniciar);
 
 ver("zona");
+
+/* ---------- PWA ---------- */
+
+const instalada = () =>
+  window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+
+const esIOS =
+  /iP(hone|ad|od)/.test(navigator.userAgent) ||
+  (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+let promptInstalacion = null;
+
+window.addEventListener("beforeinstallprompt", (evento) => {
+  evento.preventDefault();
+  promptInstalacion = evento;
+  if (!instalada()) el.instalar.hidden = false;
+});
+
+window.addEventListener("appinstalled", () => {
+  el.instalar.hidden = true;
+  el.ayudaInstalar.hidden = true;
+});
+
+el.instalar.addEventListener("click", async () => {
+  if (promptInstalacion) {
+    promptInstalacion.prompt();
+    const { outcome } = await promptInstalacion.userChoice;
+    if (outcome === "accepted") el.instalar.hidden = true;
+    promptInstalacion = null;
+    return;
+  }
+
+  // En iPhone no existe el prompt: mostramos las instrucciones.
+  el.ayudaInstalar.hidden = !el.ayudaInstalar.hidden;
+});
+
+if (esIOS && !instalada()) {
+  el.instalar.hidden = false;
+}
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      // Sin service worker la app funciona igual, solo pierde el modo offline.
+    });
+  });
+}

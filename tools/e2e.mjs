@@ -14,6 +14,7 @@ const URL_BASE = `http://127.0.0.1:${PUERTO_SITIO}/`;
 const FIXTURE = resolve("tools/fixtures/foto.jpg");
 const SHOT = process.argv[2] ?? "mobile";
 const MODO = process.argv[3] ?? "input";
+const PROBAR_OFFLINE = process.argv.includes("offline");
 const EXTRA = MODO === "wasm" ? "?wasm=1" : "";
 const ANCHO = SHOT === "desktop" ? 1200 : 430;
 const ALTO = SHOT === "desktop" ? 900 : 932;
@@ -128,10 +129,16 @@ try {
     return result?.value;
   };
 
-  for (let i = 0; i < 60; i += 1) {
-    if ((await evaluar("document.readyState")) === "complete") break;
-    await dormir(200);
+  // Esperamos a que el DOM y el modulo esten listos de verdad.
+  let listo = false;
+  for (let i = 0; i < 80; i += 1) {
+    listo = await evaluar(
+      "document.readyState === 'complete' && !!document.getElementById('archivo-galeria')",
+    );
+    if (listo) break;
+    await dormir(150);
   }
+  if (!listo) throw new Error("la pagina no termino de cargar");
 
   const datosDelEvento = `(async () => {
     const respuesta = await fetch("./tools/fixtures/foto.jpg");
@@ -167,6 +174,12 @@ try {
     })()`, { awaitPromise: true });
     if (!ok) throw new Error("no se pudo simular el evento");
   }
+
+  console.log("estado tras inyectar:", await evaluar(`JSON.stringify({
+    archivos: document.getElementById("archivo-galeria").files.length,
+    progreso: !document.getElementById("progreso").hidden,
+    resultado: !document.getElementById("resultado").hidden,
+  })`));
 
   let visible = false;
   for (let i = 0; i < 100; i += 1) {
@@ -252,6 +265,26 @@ try {
     clip: { x: 0, y: 0, width, height, scale: 1 },
   });
   writeFileSync(`.shots/e2e-${SHOT}-${MODO}.png`, Buffer.from(captura.data, "base64"));
+
+  if (PROBAR_OFFLINE) {
+    const pwa = await evaluar(`(async () => {
+      const registros = await navigator.serviceWorker.getRegistrations();
+      await navigator.serviceWorker.ready;
+      return { registros: registros.length, caches: await caches.keys() };
+    })()`, { awaitPromise: true });
+    console.log("pwa:", JSON.stringify(pwa));
+    if (!pwa.registros) throw new Error("no se registro el service worker");
+
+    sitio.kill("SIGKILL");
+    await dormir(900);
+
+    await cdp.enviar("Page.reload", { ignoreCache: false });
+    await dormir(2500);
+
+    const texto = await evaluar("document.body ? document.body.innerText : ''");
+    if (!/awebp/i.test(texto)) throw new Error("la app no cargo sin conexion");
+    console.log("offline OK");
+  }
 
   console.log(`OK ${SHOT}`);
   salida = 0;
