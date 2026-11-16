@@ -111,6 +111,8 @@ const chrome = spawn(
     "--no-sandbox",
     "--disable-gpu",
     "--hide-scrollbars",
+    "--use-fake-device-for-media-stream",
+    "--use-fake-ui-for-media-stream",
     `--remote-debugging-port=${PUERTO_CDP_FIJO}`,
     `--user-data-dir=${perfil}`,
     `--window-size=${ANCHO},${ALTO}`,
@@ -184,7 +186,32 @@ try {
     if (!ok) throw new Error("no se pudo inyectar el archivo");
   };
 
-  if (MODO === "share") {
+  if (MODO === "camera") {
+    await evaluar(`document.getElementById("boton-camara").click()`);
+
+    let abierta = false;
+    for (let i = 0; i < 80; i += 1) {
+      abierta = await evaluar("!document.getElementById('camara').hidden");
+      if (abierta) break;
+      await dormir(150);
+    }
+    if (!abierta) throw new Error("no se abrio la camara en pantalla");
+
+    await dormir(1200);
+
+    const capturaModal = await cdp.enviar("Page.captureScreenshot", { format: "png" });
+    writeFileSync(`.shots/camara-${SHOT}.png`, Buffer.from(capturaModal.data, "base64"));
+
+    const medidasVideo = await evaluar(`({
+      ancho: document.getElementById("camara-video").videoWidth,
+      alto: document.getElementById("camara-video").videoHeight,
+    })`);
+    console.log("video:", JSON.stringify(medidasVideo));
+    if (!medidasVideo.ancho) throw new Error("el video de la camara no tiene imagen");
+
+    await evaluar(`document.getElementById("camara-disparar").click()`);
+    await dormir(500);
+  } else if (MODO === "share") {
     const listoSW = await evaluar(`(async () => {
       if (!("serviceWorker" in navigator)) return false;
       await navigator.serviceWorker.ready;
@@ -350,13 +377,15 @@ try {
     console.log("calidad 50%:", JSON.stringify(trasCalidad));
     if (trasCalidad.calidad !== "50 %") throw new Error("la calidad no se aplico");
 
-    await evaluar(`document.querySelector('.chip[data-max="800"]').click()`);
-    await dormir(500);
-    await esperarQuieto();
-    const trasTamano = await evaluar("document.getElementById('dimensiones').textContent");
-    console.log("max 800:", trasTamano);
-    const medidas = trasTamano.match(/^(\d+) × (\d+) px$/);
-    if (!medidas || Number(medidas[1]) !== 800) throw new Error(`tamano inesperado: ${trasTamano}`);
+    if (MODO !== "camera") {
+      await evaluar(`document.querySelector('.chip[data-max="800"]').click()`);
+      await dormir(500);
+      await esperarQuieto();
+      const trasTamano = await evaluar("document.getElementById('dimensiones').textContent");
+      console.log("max 800:", trasTamano);
+      const medidas = trasTamano.match(/^(\d+) × (\d+) px$/);
+      if (!medidas || Number(medidas[1]) !== 800) throw new Error(`tamano inesperado: ${trasTamano}`);
+    }
   }
 
   if (PROBAR_OFFLINE && sitio) {
