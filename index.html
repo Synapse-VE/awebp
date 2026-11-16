@@ -3,18 +3,151 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>awebp — convierte tus fotos a WebP</title>
-    <meta name="description" content="Convierte tus fotos a WebP sin subirlas a ningun lado. Todo pasa en tu navegador." />
+    <title>awebp — tus fotos, en WebP</title>
+    <meta
+      name="description"
+      content="Convierte tus fotos a WebP en un toque, sin subirlas a ningún lado. Todo pasa en tu navegador."
+    />
     <meta name="theme-color" content="#0a0e13" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icono-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="./css/estilos.css" />
   </head>
+
   <body>
-    <header>
-      <h1>awebp</h1>
-      <p>Preparando el conversor…</p>
+    <header class="cabecera">
+      <a class="marca" href="./">
+        <img src="./icons/icono-192.png" alt="" width="34" height="34" />
+        <span>awebp</span>
+      </a>
+      <button id="instalar" class="boton instalar" type="button" hidden>Instalar</button>
     </header>
+
     <main>
-      <p>Todo va a pasar en tu navegador: tus fotos no se suben a ningun lado.</p>
+      <section class="hero">
+        <h1>Tus fotos, en WebP</h1>
+        <p>Sin subir nada. Sin cuentas. Todo pasa en tu navegador.</p>
+      </section>
+
+      <section id="zona" class="zona" aria-label="Elegir una foto">
+        <svg class="zona-icono" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+          <polyline points="7 10 12 15 17 10" />
+          <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+        <p class="zona-titulo">Arrastra una foto acá</p>
+        <p class="zona-sub">o elige una de tu galería</p>
+
+        <div class="acciones-iniciales">
+          <button id="boton-camara" class="boton primario" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+              <circle cx="12" cy="13" r="3.5" />
+            </svg>
+            Tomar foto
+          </button>
+          <button id="boton-elegir" class="boton" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <polyline points="21 15 16 10 5 21" />
+            </svg>
+            Elegir imagen
+          </button>
+        </div>
+
+        <p class="zona-nota">JPG, PNG o WebP · se convierte al instante</p>
+
+        <input id="archivo-camara" type="file" accept="image/*" capture="environment" hidden />
+        <input id="archivo-galeria" type="file" accept="image/*" hidden />
+      </section>
+
+      <section id="progreso" class="tarjeta progreso" hidden aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        <p>Convirtiendo…</p>
+      </section>
+
+      <section id="error" class="tarjeta error" role="alert" hidden>
+        <h2 id="error-titulo">No se pudo convertir</h2>
+        <p id="error-detalle"></p>
+        <button id="error-reintentar" class="boton" type="button">Probar con otra foto</button>
+      </section>
+
+      <section id="resultado" class="tarjeta resultado" hidden>
+        <div class="comparativa">
+          <figure class="muestra">
+            <div class="marco">
+              <img id="vista-original" alt="Foto original" />
+            </div>
+            <figcaption>Original · <strong id="peso-original">—</strong></figcaption>
+          </figure>
+
+          <div class="flecha" aria-hidden="true">→</div>
+
+          <figure class="muestra">
+            <div class="marco">
+              <img id="vista-webp" alt="Foto convertida a WebP" />
+            </div>
+            <figcaption>WebP · <strong id="peso-webp">—</strong></figcaption>
+          </figure>
+        </div>
+
+        <p id="ahorro" class="ahorro" aria-live="polite"></p>
+
+        <dl class="datos">
+          <div>
+            <dt>Dimensiones</dt>
+            <dd id="dimensiones">—</dd>
+          </div>
+          <div>
+            <dt>Calidad</dt>
+            <dd id="calidad-usada">—</dd>
+          </div>
+        </dl>
+
+        <div class="acciones">
+          <button id="descargar" class="boton primario" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Descargar
+          </button>
+          <button id="compartir" class="boton" type="button" hidden>Compartir</button>
+          <button id="otra" class="boton fantasma" type="button">Otra foto</button>
+        </div>
+      </section>
+
+      <section id="ajustes" class="tarjeta ajustes" hidden>
+        <div class="ajuste">
+          <label for="calidad">Calidad <output id="valor-calidad">80 %</output></label>
+          <input id="calidad" type="range" min="40" max="95" step="5" value="80" />
+        </div>
+
+        <div class="ajuste">
+          <span class="ajuste-titulo" id="tamano-titulo">Tamaño máximo</span>
+          <div class="chips" role="group" aria-labelledby="tamano-titulo">
+            <button class="chip activo" type="button" data-max="0" aria-pressed="true">Original</button>
+            <button class="chip" type="button" data-max="1920" aria-pressed="false">1920 px</button>
+            <button class="chip" type="button" data-max="1280" aria-pressed="false">1280 px</button>
+            <button class="chip" type="button" data-max="800" aria-pressed="false">800 px</button>
+          </div>
+        </div>
+      </section>
+
+      <p class="privacidad">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <rect x="3" y="11" width="18" height="11" rx="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+        Tu foto nunca sale del teléfono: no hay servidor que la reciba.
+      </p>
     </main>
+
+    <footer class="pie">
+      <p>Hecho con cariño · <a href="https://github.com/Synapse-VE/awebp">código abierto</a></p>
+    </footer>
   </body>
 </html>
