@@ -4,16 +4,17 @@
  * Levanta el sitio, sube una foto real por el input y verifica el resultado.
  */
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const PUERTO_SITIO = 8099;
-const PUERTO_CDP = 9333;
+let PUERTO_CDP = 0;
 const URL_BASE = `http://127.0.0.1:${PUERTO_SITIO}/`;
 const FIXTURE = resolve("tools/fixtures/foto.jpg");
 const SHOT = process.argv[2] ?? "mobile";
-const EXTRA = process.argv[3] === "wasm" ? "?wasm=1" : "";
+const MODO = process.argv[3] ?? "input";
+const EXTRA = MODO === "wasm" ? "?wasm=1" : "";
 const ANCHO = SHOT === "desktop" ? 1200 : 430;
 const ALTO = SHOT === "desktop" ? 900 : 932;
 
@@ -83,7 +84,7 @@ const chrome = spawn(
     "--no-sandbox",
     "--disable-gpu",
     "--hide-scrollbars",
-    `--remote-debugging-port=${PUERTO_CDP}`,
+    "--remote-debugging-port=0",
     `--user-data-dir=${perfil}`,
     `--window-size=${ANCHO},${ALTO}`,
     URL_BASE + EXTRA,
@@ -92,13 +93,27 @@ const chrome = spawn(
 );
 
 let salida = 1;
+let cdp;
 
 try {
+  // Chrome escribe el puerto real en DevToolsActivePort.
+  const archivoPuerto = join(perfil, "DevToolsActivePort");
+  for (let i = 0; i < 80; i += 1) {
+    try {
+      const [linea] = readFileSync(archivoPuerto, "utf8").split("\n");
+      if (linea) { PUERTO_CDP = Number(linea); break; }
+    } catch {
+      /* todavia no existe */
+    }
+    await dormir(150);
+  }
+  if (!PUERTO_CDP) throw new Error("Chrome no levanto el puerto de depuracion");
+
   await esperarJson(`http://127.0.0.1:${PUERTO_CDP}/json/version`);
   const lista = await esperarJson(`http://127.0.0.1:${PUERTO_CDP}/json/list`);
   const pagina = lista.find((objetivo) => objetivo.type === "page" && objetivo.url.startsWith(URL_BASE)) ?? lista.find((objetivo) => objetivo.type === "page");
   if (!pagina) throw new Error("no encontre la pestana");
-  const cdp = await conectar(pagina.webSocketDebuggerUrl);
+  cdp = await conectar(pagina.webSocketDebuggerUrl);
 
   await cdp.enviar("Page.enable");
   await cdp.enviar("Runtime.enable");
@@ -118,14 +133,40 @@ try {
     await dormir(200);
   }
 
-  const { root } = await cdp.enviar("DOM.getDocument");
-  const { nodeId } = await cdp.enviar("DOM.querySelector", {
-    nodeId: root.nodeId,
-    selector: "#archivo-galeria",
-  });
-  if (!nodeId) throw new Error("no encontre el input de archivo");
+  const datosDelEvento = `(async () => {
+    const respuesta = await fetch("./tools/fixtures/foto.jpg");
+    const blob = await respuesta.blob();
+    return new File([blob], "foto.jpg", { type: "image/jpeg" });
+  })()`;
 
-  await cdp.enviar("DOM.setFileInputFiles", { nodeId, files: [FIXTURE] });
+  if (MODO === "input" || MODO === "wasm") {
+    const ok = await evaluar(`(async () => {
+      const archivo = await ${datosDelEvento};
+      const datos = new DataTransfer();
+      datos.items.add(archivo);
+      const input = document.getElementById("archivo-galeria");
+      input.files = datos.files;
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`, { awaitPromise: true });
+    if (!ok) throw new Error("no se pudo inyectar el archivo");
+  } else {
+    const tipoEvento = MODO === "drop" ? "DragEvent" : "ClipboardEvent";
+    const campoDatos = MODO === "drop" ? "dataTransfer" : "clipboardData";
+    const ok = await evaluar(`(async () => {
+      const blob = await (await fetch("./tools/fixtures/foto.jpg")).blob();
+      const archivo = new File([blob], "foto.jpg", { type: "image/jpeg" });
+      const datos = new DataTransfer();
+      datos.items.add(archivo);
+      const evento = new ${tipoEvento}("${MODO}", { bubbles: true, cancelable: true });
+      if (!evento.${campoDatos}) {
+        Object.defineProperty(evento, "${campoDatos}", { value: datos });
+      }
+      window.dispatchEvent(evento);
+      return true;
+    })()`, { awaitPromise: true });
+    if (!ok) throw new Error("no se pudo simular el evento");
+  }
 
   let visible = false;
   for (let i = 0; i < 100; i += 1) {
@@ -134,9 +175,14 @@ try {
     await dormir(150);
   }
   if (!visible) {
-    const detalle = await evaluar(
-      "document.getElementById('error').hidden ? 'sin error' : document.getElementById('error-detalle').textContent",
-    );
+    const detalle = await evaluar(`JSON.stringify({
+      url: location.href,
+      titulo: document.title,
+      texto: document.body ? document.body.innerText.slice(0, 240) : "sin body",
+      error: (document.getElementById("error") || {}).hidden === false
+        ? document.getElementById("error-detalle").textContent
+        : "sin error",
+    })`);
     throw new Error(`no aparecio el resultado (${detalle})`);
   }
 
@@ -205,7 +251,7 @@ try {
     captureBeyondViewport: true,
     clip: { x: 0, y: 0, width, height, scale: 1 },
   });
-  writeFileSync(`.shots/e2e-${SHOT}${EXTRA ? "-wasm" : ""}.png`, Buffer.from(captura.data, "base64"));
+  writeFileSync(`.shots/e2e-${SHOT}-${MODO}.png`, Buffer.from(captura.data, "base64"));
 
   console.log(`OK ${SHOT}`);
   salida = 0;

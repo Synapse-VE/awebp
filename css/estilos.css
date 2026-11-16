@@ -366,13 +366,13 @@ figcaption strong {
 
 .acciones {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 10px;
   margin-top: 18px;
 }
 
 .acciones .boton {
-  flex: 1 1 auto;
+  width: 100%;
 }
 
 /* ---------- ajustes ---------- */
@@ -413,7 +413,7 @@ input[type="range"] {
 
 .chip {
   min-height: 40px;
-  padding: 8px 14px;
+  padding: 8px 12px;
   border-radius: 999px;
   border: 1px solid var(--borde);
   background: transparent;
@@ -486,6 +486,15 @@ input[type="range"] {
     grid-template-columns: 1fr auto 1fr;
   }
 
+  .acciones {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+
+  .acciones .boton {
+    width: auto;
+  }
+
   .flecha {
     display: block;
   }
@@ -520,4 +529,48 @@ input[type="range"] {
 .resultado.cargando .acciones,
 .resultado.cargando .descargar {
   pointer-events: none;
+}
+
+/* ---------- entrada por arrastre o pegado ---------- */
+
+.zona-extra {
+  display: none;
+  margin: 12px 0 0;
+  color: var(--apagado);
+  font-size: 0.8rem;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .zona-extra {
+    display: block;
+  }
+}
+
+kbd {
+  display: inline-block;
+  padding: 1px 6px;
+  border: 1px solid var(--borde);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  background: var(--superficie-2);
+  color: var(--texto);
+  font-family: inherit;
+  font-size: 0.75rem;
+}
+
+body.recibiendo::after {
+  content: "Soltá la foto acá";
+  position: fixed;
+  inset: 12px;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--acento);
+  border-radius: 20px;
+  background: rgba(10, 14, 19, 0.88);
+  color: var(--acento);
+  font-size: 1.15rem;
+  font-weight: 700;
+  pointer-events: none;
+  animation: aparecer 0.15s ease both;
 }
