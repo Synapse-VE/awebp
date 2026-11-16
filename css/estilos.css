@@ -505,3 +505,19 @@ input[type="range"] {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ---------- estados dinamicos ---------- */
+
+.zona {
+  cursor: pointer;
+}
+
+.resultado.cargando {
+  opacity: 0.55;
+  transition: opacity 0.15s ease;
+}
+
+.resultado.cargando .acciones,
+.resultado.cargando .descargar {
+  pointer-events: none;
+}
