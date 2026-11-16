@@ -6,7 +6,7 @@
  * visita es instantanea y, cuando hay una version nueva, se toma en la
  * siguiente recarga. El wasm del encoder se cachea la primera vez que se usa.
  */
-const VERSION = "2";
+const VERSION = "3";
 const CACHE = `awebp-v${VERSION}`;
 const CACHE_COMPARTIDO = "awebp-compartido-v1";
 
