@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.3.1] - 2026-11-16
+
+### Corregido
+
+- "Tomar foto" abre la camara dentro de la app con `getUserMedia`. Antes dependia del
+  atributo `capture` del input, que muchos navegadores ignoran y terminan abriendo la
+  galeria (iOS Safari, Firefox Android, Samsung Internet). Si el permiso falla, se avisa
+  y se cae al selector del sistema.
+- La camara pide 1920x1080 como resolucion ideal (antes quedaba en la que eligiera el
+  navegador).
+
+### Agregado
+
+- Prueba E2E `camera` con dispositivo de video falso de Chrome.
+
 ## [0.3.0] - 2026-11-16
 
 ### Agregado

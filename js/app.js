@@ -43,6 +43,11 @@ const el = {
   otraLista: $("otra-lista"),
   calidad: $("calidad"),
   valorCalidad: $("valor-calidad"),
+  camara: $("camara"),
+  camaraVideo: $("camara-video"),
+  camaraCancelar: $("camara-cancelar"),
+  camaraDisparar: $("camara-disparar"),
+  camaraError: $("camara-error"),
   instalar: $("instalar"),
   ayudaInstalar: $("ayuda-instalar"),
   chips: [...document.querySelectorAll(".chip")],
@@ -448,7 +453,83 @@ window.addEventListener("paste", (evento) => {
   agregarArchivos([archivo]);
 });
 
-el.botonCamara.addEventListener("click", () => el.inputCamara.click());
+/* ---------- camara en pantalla ---------- */
+
+let flujoCamara = null;
+
+async function abrirCamara() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    // Sin getUserMedia, el input con capture es lo unico que queda.
+    el.inputCamara.click();
+    return;
+  }
+
+  try {
+    flujoCamara = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+      audio: false,
+    });
+
+    el.camaraError.hidden = true;
+    el.camaraVideo.srcObject = flujoCamara;
+    el.camara.hidden = false;
+    document.body.classList.add("camara-abierta");
+    el.camaraDisparar.focus();
+  } catch {
+    // Sin permisos o sin camara: al menos queda el selector del sistema.
+    cerrarCamara();
+    mostrarAviso("No pudimos abrir la camara. Elegi una foto o revisa los permisos del navegador.");
+    el.inputCamara.click();
+  }
+}
+
+function cerrarCamara() {
+  if (flujoCamara) {
+    for (const pista of flujoCamara.getTracks()) pista.stop();
+    flujoCamara = null;
+  }
+
+  el.camaraVideo.srcObject = null;
+  el.camara.hidden = true;
+  document.body.classList.remove("camara-abierta");
+}
+
+async function dispararCamara() {
+  const video = el.camaraVideo;
+  const ancho = video.videoWidth;
+  const alto = video.videoHeight;
+
+  if (!ancho || !alto) {
+    el.camaraError.textContent = "La camara todavia no esta lista. Proba de nuevo.";
+    el.camaraError.hidden = false;
+    return;
+  }
+
+  const lienzo = document.createElement("canvas");
+  lienzo.width = ancho;
+  lienzo.height = alto;
+  lienzo.getContext("2d").drawImage(video, 0, 0, ancho, alto);
+
+  const blob = await new Promise((resolver) => lienzo.toBlob(resolver, "image/jpeg", 0.92));
+  cerrarCamara();
+
+  if (blob) {
+    const archivo = new File([blob], `foto-${Date.now()}.jpg`, { type: "image/jpeg" });
+    await agregarArchivos([archivo]);
+  }
+}
+
+el.botonCamara.addEventListener("click", abrirCamara);
+el.camaraCancelar.addEventListener("click", cerrarCamara);
+el.camaraDisparar.addEventListener("click", dispararCamara);
+
+window.addEventListener("keydown", (evento) => {
+  if (evento.key === "Escape" && !el.camara.hidden) cerrarCamara();
+});
 el.botonElegir.addEventListener("click", () => el.inputGaleria.click());
 el.agregar.addEventListener("click", () => el.inputGaleria.click());
 
